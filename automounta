@@ -63,7 +63,7 @@ fi
 : ${USER=""}                            # which user to use for popup
 : ${TIMEOUT="8"}                        # stop waiting for device after that time
 : ${DELAY="1"}                          # check for the device node that often
-: ${SUPPORTED_DEVICE_TYPES="da mmcsd"}  # all other devices are ignored
+: ${SUPPORTED_DEVICE_TYPES="da mmcsd ugen"}  # all other devices are ignored
 : ${STOP_DEVICES="NO"}                  # stop devices using camcontrol (no idea if it makes sence)
 : ${BLACKLIST=""}                       # blacklisted device nodes
 
@@ -77,7 +77,7 @@ fi
 
 # supported filesystems
 # FAT must be before NTFS section because: newfs_msdos -O NTFS -L NTFS
-SUPPORTED_FILESYSTEMS="FFS FAT NTFS EXT2 EXT3"
+SUPPORTED_FILESYSTEMS="FFS FAT NTFS EXT2 EXT3 MTP"
 
 FAT_ID="FAT"
 FAT_MOUNT_TOOL="mount_msdosfs"
@@ -109,6 +109,10 @@ EXT4_MOUNT_TOOL="ext4fuse"
 EXT4_MOUNT_PARAMETERS=""
 EXT4_CHECK_TOOL="e2fsck -y"
 
+MTP_ID="MTP is a handled separately, this ID is not used."
+MTP_MOUNT_TOOL="simple-mtpfs"
+MTP_MOUNT_PARAMETERS="-o allow_other"
+MTP_CHECK_TOOL=""
 
 
 ##############################################################################
@@ -186,10 +190,12 @@ __umount_all()
     do
         if (test "${MOUNTED_DEVICES}")
         then
-            MOUNTED_DEVICES_TMP=`mount | grep ${MNTPREFIX} | grep "/dev/${DEVICE_TYPE}[0-9]\+"`
+            #MOUNTED_DEVICES_TMP=`mount | grep ${MNTPREFIX} | grep "/dev/${DEVICE_TYPE}[0-9]\+"`
+            MOUNTED_DEVICES_TMP=`mount | grep ${MNTPREFIX} | grep "/${DEVICE_TYPE}[0-9.]\+"`
             MOUNTED_DEVICES=`echo -e "${MOUNTED_DEVICES}\n${MOUNTED_DEVICES_TMP}"`
         else
-            MOUNTED_DEVICES=`mount | grep ${MNTPREFIX} | grep "/dev/${DEVICE_TYPE}[0-9]\+"`
+            #MOUNTED_DEVICES=`mount | grep ${MNTPREFIX} | grep "/dev/${DEVICE_TYPE}[0-9]\+"`
+            MOUNTED_DEVICES=`mount | grep ${MNTPREFIX} | grep "/${DEVICE_TYPE}[0-9.]\+"`
         fi
     done
 
@@ -318,122 +324,180 @@ automounta_attach()
     done
 
 
-    __wait_for_device ${DEVICE_PATH}
+    case ${DEVICE} in 
+        ugen[0-9]\.[0-9])
+            # TODO I couldn't find a clean way to detect which device is
+            # actually was attached and if it is mounted. So I simply mount all
+            # devices if there are any. This may lead to problems, when many
+            # devices are attached.
+
+            sleep ${DELAY}
+            sleep ${DELAY}
+            sleep ${DELAY}
 
 
-    __check_already_mounted -d ${DEVICE_PATH}
-    __check_already_mounted -m ${MOUNT_POINT}
-
-
-    FILESYSTEM_INFO=`file -k -b -L -s ${DEVICE_PATH} | sed -E 's/label:\ \".*\"//g'`
-    MOUNT_PARAMETERS=""
-    MOUNT_TOOL=""
-
-    for SFS in ${SUPPORTED_FILESYSTEMS}
-    do
-        FILESYSTEM_ID=`eval echo \\${${SFS}_ID}`
-
-        if echo ${FILESYSTEM_INFO} | grep "${FILESYSTEM_ID}" > /dev/null
-        then
-            MOUNT_PARAMETERS=`eval echo \\${${SFS}_MOUNT_PARAMETERS}`
-            MOUNT_TOOL=`eval echo \\${${SFS}_MOUNT_TOOL}`
-            CHECK_TOOL=`eval echo \\${${SFS}_CHECK_TOOL}`
-            break
-        fi
-    done
-
-    if !(test "${MOUNT_TOOL}")
-    then
-        warn "Unsupported filesystem on device '${DEVICE}'."
-        exit 0;
-    fi
-
-    if [ "${ATIME}" = NO ]
-    then
-        MOUNT_PARAMETERS="${MOUNT_PARAMETERS} -o noatime "
-    fi
-
-    if [ "${FILESYSTEM_ID}" = "FAT" ]
-    then
-        if (test "${USER}")
-        then
-            MOUNT_PARAMETERS="${MOUNT_PARAMETERS} -u ${USER} "
-        fi
-    fi
-
-
-    CAMCONTROL_DEVICE=`echo "${DEVICE}" | grep -o "da[0-9]"`
-    if (test "${CAMCONTROL_DEVICE}")
-    then
-        INQUIRY_RESULT=`camcontrol inquiry "${CAMCONTROL_DEVICE}"`
-
-        for KNOWN_DEVICE in ${KNOWN_DEVICES}
-        do
-            KNOWN_DEVICE_ID=`eval echo \\${${KNOWN_DEVICE}_ID}`
-            if echo "${INQUIRY_RESULT}" | grep $KNOWN_DEVICE_ID > /dev/null
+            MTP_LIST=`simple-mtpfs -l`
+            if !(test "${MTP_LIST}")
             then
-                DEVICE_BLACKLISTED=`eval echo \\${${KNOWN_DEVICE}_BLACKLISTED}`
-                if (test "${DEVICE_BLACKLISTED}") && (test "${DEVICE_BLACKLISTED}" = "YES")
-                then
-                    # we should skip this device
-                    warn "Device '${DEVICE}' blocked by BLACKLIST option"
-                    exit 0;
-                else
-                    MOUNT_POINT_TMP=`eval echo \\${${KNOWN_DEVICE}_MOUNT_POINT}`
-                    MOUNT_PARAMETERS_TMP=`eval echo \\${${KNOWN_DEVICE}_MOUNT_PARAMETERS}`
-
-                    if (test "${MOUNT_POINT_TMP}")
-                    then
-                        MOUNT_POINT=${MOUNT_POINT_TMP}
-                    fi
-
-                    if (test "${MOUNT_PARAMETERS_TMP}")
-                    then
-                        MOUNT_PARAMETERS=${MOUNT_PARAMETERS_TMP}
-                    fi
-                fi
-            fi
-        done
-    fi
-
-
-    case ${FILESYSTEM_ID} in
-        (NTFS) 
-            if which ${MOUNT_TOOL} 1> /dev/null 2> /dev/null # sysutils/fusefs-ntfs
-            then
-                __create_mount_point ${MOUNT_POINT}
-                __wait_for_device ${DEVICE_PATH}
-
-                if ${MOUNT_TOOL} ${MOUNT_PARAMETERS} ${DEVICE_PATH} ${MOUNT_POINT}
-                then
-                    warn "Device '${DEVICE}' mounted at '${MOUNT_POINT}', filesystem '${FILESYSTEM_ID}'"
-                else
-                    # make nested mount try because sometimes second mount works
-                    if ${MOUNT_TOOL} ${MOUNT_PARAMETERS} ${DEVICE_PATH} ${MOUNT_POINT}
-                    then
-                        warn "Device '${DEVICE}' mounted at '${MOUNT_POINT}', filesystem '${FILESYSTEM_ID}'"
-                    else
-                        warn "Failed to mount device '${DEVICE}' at '${MOUNT_POINT}', filesystem '${FILESYSTEM_ID}'"
-                    fi
-                fi
-            fi
-            ;;
-
-        (*)
-            if (test "${CHECK_TOOL}")
-            then
-                ${CHECK_TOOL} "${DEVICE_PATH}"
+                warn "No MTP devices found."
+                exit 0;
             fi
 
+
+            __check_already_mounted -m ${MOUNT_POINT}
+
+
+            MOUNT_TOOL=${MTP_MOUNT_TOOL}
+            MOUNT_PARAMETERS=${MTP_MOUNT_PARAMETERS}
+            FILESYSTEM_ID="MTP"
+            
+
+            if !(test "${MOUNT_TOOL}")
+            then
+                warn "Mount tool is not specified for MTP."
+                exit 0;
+            fi
+
+
+            if (test "${USER}")
+            then
+                GID=`id -u ${USER}`
+                MOUNT_PARAMETERS="${MOUNT_PARAMETERS} -o gid=${GID}"
+            fi
+            
+            
             __create_mount_point ${MOUNT_POINT}
-            __wait_for_device ${DEVICE_PATH}
 
-            if (${MOUNT_TOOL} ${MOUNT_PARAMETERS} ${DEVICE_PATH} ${MOUNT_POINT})
+            if (${MOUNT_TOOL} ${MOUNT_PARAMETERS} ${MOUNT_POINT})
             then
                 warn "Device '${DEVICE}' mounted at '${MOUNT_POINT}', filesystem '${FILESYSTEM_ID}'"
             else
                 warn "Failed to mount device '${DEVICE}' at '${MOUNT_POINT}', filesystem '${FILESYSTEM_ID}'"
             fi
+            ;;
+            
+        *)
+            CAMCONTROL_DEVICE=`echo "${DEVICE}" | grep -o "da[0-9]"`
+            if (test "${CAMCONTROL_DEVICE}")
+            then
+                INQUIRY_RESULT=`camcontrol inquiry "${CAMCONTROL_DEVICE}" -t "${TIMEOUT}"`
+            else
+                __wait_for_device ${DEVICE_PATH}
+            fi
+
+
+            __check_already_mounted -d ${DEVICE_PATH}
+            __check_already_mounted -m ${MOUNT_POINT}
+
+
+            FILESYSTEM_INFO=`file -k -b -L -s ${DEVICE_PATH} | sed -E 's/label:\ \".*\"//g'`
+            MOUNT_PARAMETERS=""
+            MOUNT_TOOL=""
+
+            for SFS in ${SUPPORTED_FILESYSTEMS}
+            do
+                FILESYSTEM_ID=`eval echo \\${${SFS}_ID}`
+
+                if echo ${FILESYSTEM_INFO} | grep "${FILESYSTEM_ID}" > /dev/null
+                then
+                    MOUNT_PARAMETERS=`eval echo \\${${SFS}_MOUNT_PARAMETERS}`
+                    MOUNT_TOOL=`eval echo \\${${SFS}_MOUNT_TOOL}`
+                    CHECK_TOOL=`eval echo \\${${SFS}_CHECK_TOOL}`
+                    break
+                fi
+            done
+
+            if !(test "${MOUNT_TOOL}")
+            then
+                warn "Unsupported filesystem on device '${DEVICE}'."
+                exit 0;
+            fi
+
+            if [ "${ATIME}" = NO ]
+            then
+                MOUNT_PARAMETERS="${MOUNT_PARAMETERS} -o noatime "
+            fi
+
+            if [ "${FILESYSTEM_ID}" = "FAT" ]
+            then
+                if (test "${USER}")
+                then
+                    MOUNT_PARAMETERS="${MOUNT_PARAMETERS} -u ${USER} "
+                fi
+            fi
+
+
+            if (test "${CAMCONTROL_DEVICE}")
+            then
+                for KNOWN_DEVICE in ${KNOWN_DEVICES}
+                do
+                    KNOWN_DEVICE_ID=`eval echo \\${${KNOWN_DEVICE}_ID}`
+                    if echo "${INQUIRY_RESULT}" | grep $KNOWN_DEVICE_ID > /dev/null
+                    then
+                        DEVICE_BLACKLISTED=`eval echo \\${${KNOWN_DEVICE}_BLACKLISTED}`
+                        if (test "${DEVICE_BLACKLISTED}") && (test "${DEVICE_BLACKLISTED}" = "YES")
+                        then
+                            # we should skip this device
+                            warn "Device '${DEVICE}' blocked by BLACKLIST option"
+                            exit 0;
+                        else
+                            MOUNT_POINT_TMP=`eval echo \\${${KNOWN_DEVICE}_MOUNT_POINT}`
+                            MOUNT_PARAMETERS_TMP=`eval echo \\${${KNOWN_DEVICE}_MOUNT_PARAMETERS}`
+
+                            if (test "${MOUNT_POINT_TMP}")
+                            then
+                                MOUNT_POINT=${MOUNT_POINT_TMP}
+                            fi
+
+                            if (test "${MOUNT_PARAMETERS_TMP}")
+                            then
+                                MOUNT_PARAMETERS=${MOUNT_PARAMETERS_TMP}
+                            fi
+                        fi
+                    fi
+                done
+            fi
+
+
+            case ${FILESYSTEM_ID} in
+                (NTFS) 
+                    if which ${MOUNT_TOOL} 1> /dev/null 2> /dev/null # sysutils/fusefs-ntfs
+                    then
+                        __create_mount_point ${MOUNT_POINT}
+                        __wait_for_device ${DEVICE_PATH}
+
+                        if ${MOUNT_TOOL} ${MOUNT_PARAMETERS} ${DEVICE_PATH} ${MOUNT_POINT}
+                        then
+                            warn "Device '${DEVICE}' mounted at '${MOUNT_POINT}', filesystem '${FILESYSTEM_ID}'"
+                        else
+                            # make nested mount try because sometimes second mount works
+                            if ${MOUNT_TOOL} ${MOUNT_PARAMETERS} ${DEVICE_PATH} ${MOUNT_POINT}
+                            then
+                                warn "Device '${DEVICE}' mounted at '${MOUNT_POINT}', filesystem '${FILESYSTEM_ID}'"
+                            else
+                                warn "Failed to mount device '${DEVICE}' at '${MOUNT_POINT}', filesystem '${FILESYSTEM_ID}'"
+                            fi
+                        fi
+                    fi
+                    ;;
+
+                (*)
+                    if (test "${CHECK_TOOL}")
+                    then
+                        ${CHECK_TOOL} "${DEVICE_PATH}"
+                    fi
+
+                    __create_mount_point ${MOUNT_POINT}
+                    __wait_for_device ${DEVICE_PATH}
+
+                    if (${MOUNT_TOOL} ${MOUNT_PARAMETERS} ${DEVICE_PATH} ${MOUNT_POINT})
+                    then
+                        warn "Device '${DEVICE}' mounted at '${MOUNT_POINT}', filesystem '${FILESYSTEM_ID}'"
+                    else
+                        warn "Failed to mount device '${DEVICE}' at '${MOUNT_POINT}', filesystem '${FILESYSTEM_ID}'"
+                    fi
+                    ;;
+            esac
             ;;
     esac
 

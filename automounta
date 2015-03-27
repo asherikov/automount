@@ -110,7 +110,7 @@ EXT4_MOUNT_PARAMETERS=""
 EXT4_CHECK_TOOL="e2fsck -y"
 
 MTP_ID="MTP is a handled separately, this ID is not used."
-MTP_MOUNT_TOOL="simple-mtpfs"
+MTP_MOUNT_TOOL="/usr/local/bin/simple-mtpfs"
 MTP_MOUNT_PARAMETERS="-o allow_other"
 MTP_CHECK_TOOL=""
 
@@ -333,10 +333,9 @@ automounta_attach()
 
             sleep ${DELAY}
             sleep ${DELAY}
-            sleep ${DELAY}
 
 
-            MTP_LIST=`simple-mtpfs -l`
+            MTP_LIST=`${MTP_MOUNT_TOOL} -l`
             if !(test "${MTP_LIST}")
             then
                 warn "No MTP devices found."

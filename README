@@ -17,6 +17,8 @@ Main differences from automount:
     5) Some configuration parameters were removed, but can be reintroduced if
     needed.
 
+    6) Basic support for MTP
+
 
 Refer to automounta.conf for decription of supported configuration parameters.
 
@@ -33,3 +35,4 @@ Installation:
 WARNING:
 Only basic functionality is tested on FFS and FAT filesystems. The code is
 sloppy and likely to contain bugs.
+

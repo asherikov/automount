@@ -1,4 +1,4 @@
-#! /bin/sh 
+#! /bin/sh
 # -x
 
 # Copyright (c) 2014    Alexander Sherikov
@@ -81,7 +81,7 @@ SUPPORTED_FILESYSTEMS="FFS FAT NTFS EXT2 EXT3 MTP"
 
 FAT_ID="FAT"
 FAT_MOUNT_TOOL="mount_msdosfs"
-FAT_MOUNT_PARAMETERS="-o large -o longnames -m 644 -M 755 -D ${CODEPAGE} -L ${ENCODING}"
+FAT_MOUNT_PARAMETERS="-o longnames -m 644 -M 755 -D ${CODEPAGE} -L ${ENCODING}"
 FAT_CHECK_TOOL="fsck_msdosfs -C -y"
 
 FFS_ID="Unix Fast File system"
@@ -110,7 +110,8 @@ EXT4_MOUNT_PARAMETERS=""
 EXT4_CHECK_TOOL="e2fsck -y"
 
 MTP_ID="MTP is a handled separately, this ID is not used."
-MTP_MOUNT_TOOL="/usr/local/bin/simple-mtpfs"
+MTP_MOUNT_TOOL="/usr/local/bin/jmtpfs"
+#MTP_MOUNT_TOOL="/usr/local/bin/simple-mtpfs"
 MTP_MOUNT_PARAMETERS="-o allow_other"
 MTP_CHECK_TOOL=""
 
@@ -129,7 +130,7 @@ __create_mount_point()
 }
 
 
-__remove_dir() 
+__remove_dir()
 { # 1=TARGET
     if [ "${REMOVEDIRS}" = YES ]
     then
@@ -138,7 +139,7 @@ __remove_dir()
 }
 
 
-__check_already_mounted() 
+__check_already_mounted()
 { # 1=(-d|-m) 2=(DEV|MNT)
     local MOUNT="$( mount )"
     case ${1} in
@@ -276,7 +277,7 @@ __wait_for_device() { # 1=DEV
 # Primary functions
 ##############################################################################
 
-automounta_usage() 
+automounta_usage()
 {
     cat << EOF
 Parameters can be specified in /usr/local/etc/${name}.conf
@@ -306,9 +307,9 @@ automounta_attach()
     DEVICE_PATH=/dev/${DEVICE}
     MOUNT_POINT=${MNTPREFIX}/${DEVICE}
 
-    
+
     if !(test "${DEVICE}")
-    then 
+    then
         warn "Device is not specified."
         exit 0
     fi
@@ -324,7 +325,7 @@ automounta_attach()
     done
 
 
-    case ${DEVICE} in 
+    case ${DEVICE} in
         ugen[0-9]\.[0-9])
             # TODO I couldn't find a clean way to detect which device is
             # actually was attached and if it is mounted. So I simply mount all
@@ -335,7 +336,7 @@ automounta_attach()
             sleep ${DELAY}
 
 
-            MTP_LIST=`${MTP_MOUNT_TOOL} -l`
+            MTP_LIST=`${MTP_MOUNT_TOOL} -l | grep "Device"`
             if !(test "${MTP_LIST}")
             then
                 warn "No MTP devices found."
@@ -349,7 +350,7 @@ automounta_attach()
             MOUNT_TOOL=${MTP_MOUNT_TOOL}
             MOUNT_PARAMETERS=${MTP_MOUNT_PARAMETERS}
             FILESYSTEM_ID="MTP"
-            
+
 
             if !(test "${MOUNT_TOOL}")
             then
@@ -363,8 +364,8 @@ automounta_attach()
                 GID=`id -u ${USER}`
                 MOUNT_PARAMETERS="${MOUNT_PARAMETERS} -o gid=${GID}"
             fi
-            
-            
+
+
             __create_mount_point ${MOUNT_POINT}
 
             if (${MOUNT_TOOL} ${MOUNT_PARAMETERS} ${MOUNT_POINT})
@@ -374,7 +375,7 @@ automounta_attach()
                 warn "Failed to mount device '${DEVICE}' at '${MOUNT_POINT}', filesystem '${FILESYSTEM_ID}'"
             fi
             ;;
-            
+
         *)
             CAMCONTROL_DEVICE=`echo "${DEVICE}" | grep -o "da[0-9]"`
             if (test "${CAMCONTROL_DEVICE}")
@@ -459,7 +460,7 @@ automounta_attach()
 
 
             case ${FILESYSTEM_ID} in
-                (NTFS) 
+                (NTFS)
                     if which ${MOUNT_TOOL} 1> /dev/null 2> /dev/null # sysutils/fusefs-ntfs
                     then
                         __create_mount_point ${MOUNT_POINT}
@@ -488,6 +489,7 @@ automounta_attach()
 
                     __create_mount_point ${MOUNT_POINT}
                     __wait_for_device ${DEVICE_PATH}
+                    sleep 1
 
                     if (${MOUNT_TOOL} ${MOUNT_PARAMETERS} ${DEVICE_PATH} ${MOUNT_POINT})
                     then
